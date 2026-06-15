@@ -36,9 +36,16 @@ export async function updateSession(request: NextRequest) {
     }
   );
 
+  // Use getSession() instead of getUser(): getUser() makes a network round
+  // trip to Supabase's Auth (GoTrue) API on every single request (including
+  // every navigation and asset-adjacent request matched by this
+  // middleware), which has been observed to add ~10s of latency. getSession()
+  // reads/refreshes the session from cookies locally without that extra
+  // network call.
   const {
-    data: { user },
-  } = await supabase.auth.getUser();
+    data: { session },
+  } = await supabase.auth.getSession();
+  const user = session?.user ?? null;
 
   const path = request.nextUrl.pathname;
   const isPublic = PUBLIC_PATHS.some((p) => path.startsWith(p)) || path === "/";
