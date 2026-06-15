@@ -102,19 +102,19 @@ export function SettingsView({ initialUser, initialSubscription }: SettingsViewP
     {
       key: "free" as const,
       name: "Free",
-      price: "฿0",
+      price: t("settings.allFeaturesFree"),
       features: ["transactions.title", "budgets.title", "goals.title"],
     },
     {
       key: "pro" as const,
       name: "Pro",
-      price: "฿199/mo",
+      price: t("settings.allFeaturesFree"),
       features: ["chat.title", "forecast.title", "insights.title", "wrapped.title"],
     },
     {
       key: "family" as const,
       name: "Family",
-      price: "฿349/mo",
+      price: t("settings.allFeaturesFree"),
       features: ["family.title", "chat.title", "forecast.title", "insights.title"],
     },
   ];
@@ -293,7 +293,7 @@ export function SettingsView({ initialUser, initialSubscription }: SettingsViewP
               );
             })}
           </div>
-          <p className="mt-3 text-xs text-muted-foreground">{t("settings.unlockAiFeatures")}</p>
+          <p className="mt-3 text-xs text-muted-foreground">{t("settings.allFeaturesFree")}</p>
         </CardContent>
       </Card>
 
