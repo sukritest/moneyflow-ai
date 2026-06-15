@@ -1,0 +1,553 @@
+// ============================================================================
+// MoneyFlow AI - Prisma Schema
+// ----------------------------------------------------------------------------
+// This schema is configured for SQLite by default so the project runs with
+// zero external setup (`npx prisma migrate dev`). For production, switch the
+// datasource to PostgreSQL/Supabase - see prisma/POSTGRES_MIGRATION.md and
+// DEPLOYMENT.md for the exact diff (native enums, Decimal types, arrays).
+//
+// SQLite does not support: enums, native arrays, @db.Decimal.
+// -> "Enum-like" fields are typed `String` with allowed values documented
+//    inline and enforced via Zod schemas in src/lib/validations.
+// -> Money fields use `Float` (stored as smallest currency unit is NOT
+//    required for THB/USD precision at this scale, but for Postgres prod
+//    you should switch to `Decimal @db.Decimal(14,2)`).
+// -> Array fields (e.g. tag ids) use relation tables instead of scalar lists.
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ----------------------------------------------------------------------------
+// USERS & AUTH
+// ----------------------------------------------------------------------------
+
+model User {
+  id          String   @id @default(cuid())
+  supabaseId  String?  @unique // maps to Supabase auth.users.id
+  email       String   @unique
+  name        String?
+  avatarUrl   String?
+  locale      String   @default("en") // "en" | "th"
+  currency    String   @default("THB") // ISO 4217 code
+  timezone    String   @default("Asia/Bangkok")
+  theme       String   @default("system") // "light" | "dark" | "system"
+  role        String   @default("user") // "user" | "admin"
+  onboarded   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  wallets              Wallet[]
+  walletMemberships    WalletMember[]
+  categories           Category[]
+  tags                 Tag[]
+  transactions         Transaction[]
+  receipts             Receipt[]
+  recurringTxns        RecurringTransaction[]
+  budgets              Budget[]
+  goals                Goal[]
+  healthScores         FinancialHealthScore[]
+  insights             Insight[]
+  notifications        Notification[]
+  calendarEvents       CalendarEvent[]
+  chatMessages         ChatMessage[]
+  subscription         Subscription?
+  salaryAllocationPlans SalaryAllocationPlan[]
+  cashflowForecasts    CashflowForecast[]
+  emergencyPlans       EmergencyPlan[]
+  monthlyWrapped       MonthlyWrapped[]
+  ownedFamilyGroups    FamilyGroup[]          @relation("FamilyGroupOwner")
+  familyMemberships    FamilyMember[]
+  goalContributions    GoalContribution[]
+
+  @@index([email])
+}
+
+// ----------------------------------------------------------------------------
+// WALLETS (personal / shared / business / family)
+// ----------------------------------------------------------------------------
+
+model Wallet {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  type        String   @default("personal") // "personal" | "shared" | "business" | "family"
+  currency    String   @default("THB")
+  icon        String   @default("wallet")
+  color       String   @default("#6366f1")
+  balance     Float    @default(0)
+  isDefault   Boolean  @default(false)
+  archivedAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members      WalletMember[]
+  transactions Transaction[]
+  budgets      Budget[]
+  recurring    RecurringTransaction[]
+  calendarEvents CalendarEvent[]
+  familyGroup  FamilyGroup? @relation(fields: [familyGroupId], references: [id])
+  familyGroupId String?
+
+  @@index([userId])
+}
+
+// Members of a shared/family wallet (beyond the owner)
+model WalletMember {
+  id        String   @id @default(cuid())
+  walletId  String
+  wallet    Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      String   @default("member") // "owner" | "editor" | "member" | "viewer"
+  joinedAt  DateTime @default(now())
+
+  @@unique([walletId, userId])
+  @@index([userId])
+}
+
+// ----------------------------------------------------------------------------
+// CATEGORIES & TAGS
+// ----------------------------------------------------------------------------
+
+model Category {
+  id        String   @id @default(cuid())
+  userId    String?  // null = system/default category available to everyone
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  nameTh    String? // Thai translation
+  icon      String  @default("circle")
+  color     String  @default("#64748b")
+  type      String  @default("expense") // "income" | "expense"
+  parentId  String?
+  parent    Category?  @relation("CategoryToSubcategory", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  children  Category[] @relation("CategoryToSubcategory")
+  isSystem  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  transactions Transaction[]
+  budgets      Budget[]
+  recurring    RecurringTransaction[]
+
+  @@index([userId])
+}
+
+model Tag {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  color     String   @default("#94a3b8")
+  createdAt DateTime @default(now())
+
+  transactions TransactionTag[]
+
+  @@unique([userId, name])
+}
+
+// ----------------------------------------------------------------------------
+// TRANSACTIONS
+// ----------------------------------------------------------------------------
+
+model Transaction {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  walletId      String
+  wallet        Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  categoryId    String?
+  category      Category? @relation(fields: [categoryId], references: [id])
+  type          String   // "income" | "expense" | "transfer"
+  amount        Float
+  currency      String   @default("THB")
+  date          DateTime @default(now())
+  merchant      String?
+  note          String?
+  source        String   @default("manual") // "manual" | "ocr" | "voice" | "import" | "recurring"
+  recurringId   String?
+  recurring     RecurringTransaction? @relation(fields: [recurringId], references: [id])
+  isExcluded    Boolean  @default(false) // exclude from reports/budgets
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  tags     TransactionTag[]
+  receipt  Receipt?
+
+  @@index([userId, date])
+  @@index([walletId])
+  @@index([categoryId])
+}
+
+model TransactionTag {
+  transactionId String
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  tagId         String
+  tag           Tag         @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([transactionId, tagId])
+}
+
+// ----------------------------------------------------------------------------
+// RECEIPTS / OCR
+// ----------------------------------------------------------------------------
+
+model Receipt {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactionId String?  @unique
+  transaction   Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  imageUrl      String
+  status        String   @default("pending") // "pending" | "processing" | "processed" | "failed"
+  ocrMerchant   String?
+  ocrAmount     Float?
+  ocrDate       DateTime?
+  ocrCategory   String?
+  ocrRawText    String?
+  confidence    Float?
+  createdAt     DateTime @default(now())
+
+  @@index([userId])
+}
+
+// ----------------------------------------------------------------------------
+// RECURRING TRANSACTIONS / SUBSCRIPTIONS
+// ----------------------------------------------------------------------------
+
+model RecurringTransaction {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  walletId     String
+  wallet       Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  categoryId   String?
+  category     Category? @relation(fields: [categoryId], references: [id])
+  name         String
+  type         String   // "income" | "expense"
+  amount       Float
+  frequency    String   // "daily" | "weekly" | "biweekly" | "monthly" | "yearly"
+  dayOfMonth   Int?
+  startDate    DateTime @default(now())
+  endDate      DateTime?
+  nextRunDate  DateTime
+  lastRunDate  DateTime?
+  autoCreate   Boolean  @default(true)
+  isActive     Boolean  @default(true)
+  isDetected   Boolean  @default(false) // flagged automatically by recurring-detection job
+  merchant     String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  transactions Transaction[]
+  calendarEvents CalendarEvent[]
+
+  @@index([userId])
+}
+
+// ----------------------------------------------------------------------------
+// BUDGETS
+// ----------------------------------------------------------------------------
+
+model Budget {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  walletId      String?
+  wallet        Wallet?  @relation(fields: [walletId], references: [id])
+  categoryId    String?  // null = overall monthly budget
+  category      Category? @relation(fields: [categoryId], references: [id])
+  name          String
+  amount        Float
+  period        String   @default("monthly") // "weekly" | "monthly" | "yearly"
+  startDate     DateTime @default(now())
+  endDate       DateTime?
+  alertThreshold Float   @default(0.8) // 0..1, percent of budget that triggers alert
+  rollover      Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([userId])
+}
+
+// ----------------------------------------------------------------------------
+// GOALS
+// ----------------------------------------------------------------------------
+
+model Goal {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name          String
+  type          String   // "saving" | "emergency_fund" | "travel" | "car" | "house" | "custom"
+  icon          String   @default("target")
+  targetAmount  Float
+  currentAmount Float    @default(0)
+  targetDate    DateTime?
+  priority      String   @default("medium") // "low" | "medium" | "high"
+  status        String   @default("active") // "active" | "completed" | "paused" | "cancelled"
+  monthlyContribution Float? // suggested/auto contribution
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  contributions GoalContribution[]
+
+  @@index([userId])
+}
+
+model GoalContribution {
+  id        String   @id @default(cuid())
+  goalId    String
+  goal      Goal     @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount    Float
+  date      DateTime @default(now())
+  note      String?
+  createdAt DateTime @default(now())
+
+  @@index([goalId])
+}
+
+// ----------------------------------------------------------------------------
+// FINANCIAL HEALTH SCORE
+// ----------------------------------------------------------------------------
+
+model FinancialHealthScore {
+  id                     String   @id @default(cuid())
+  userId                 String
+  user                   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  score                  Int      // 0-100 overall
+  savingsRateScore       Int
+  debtRatioScore         Int
+  emergencyFundScore     Int
+  budgetAdherenceScore   Int
+  spendingConsistencyScore Int
+  breakdown              String?  // JSON string with detailed metrics
+  computedAt             DateTime @default(now())
+
+  @@index([userId, computedAt])
+}
+
+// ----------------------------------------------------------------------------
+// AI INSIGHTS / MONEY LEAKS / FORECASTS
+// ----------------------------------------------------------------------------
+
+model Insight {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String   // "daily" | "weekly" | "monthly" | "money_leak" | "forecast" | "tip"
+  severity  String   @default("info") // "info" | "warning" | "critical" | "positive"
+  title     String
+  body      String
+  data      String?  // JSON payload (charts, related transaction ids, etc.)
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, type, createdAt])
+}
+
+model CashflowForecast {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  forMonth        DateTime // first day of forecasted month
+  predictedIncome Float
+  predictedExpense Float
+  predictedBalance Float
+  scenario        String   @default("baseline") // "baseline" | "optimistic" | "pessimistic" | custom name
+  assumptions     String?  // JSON
+  createdAt       DateTime @default(now())
+
+  @@index([userId, forMonth])
+}
+
+// ----------------------------------------------------------------------------
+// FINANCIAL CALENDAR
+// ----------------------------------------------------------------------------
+
+model CalendarEvent {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  walletId     String?
+  wallet       Wallet?  @relation(fields: [walletId], references: [id])
+  recurringId  String?
+  recurring    RecurringTransaction? @relation(fields: [recurringId], references: [id])
+  title        String
+  type         String   // "bill" | "loan" | "subscription" | "salary" | "reminder"
+  amount       Float?
+  dueDate      DateTime
+  isPaid       Boolean  @default(false)
+  notifyDaysBefore Int  @default(3)
+  notes        String?
+  createdAt    DateTime @default(now())
+
+  @@index([userId, dueDate])
+}
+
+// ----------------------------------------------------------------------------
+// AI CHAT ASSISTANT
+// ----------------------------------------------------------------------------
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      String   // "user" | "assistant" | "system"
+  content   String
+  metadata  String?  // JSON: referenced charts/transactions
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+// ----------------------------------------------------------------------------
+// SALARY ALLOCATION PLANNER
+// ----------------------------------------------------------------------------
+
+model SalaryAllocationPlan {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  salaryAmount    Float
+  savingsPct      Float    @default(20)
+  investmentPct   Float    @default(10)
+  billsPct        Float    @default(50)
+  spendingPct     Float    @default(20)
+  isActive        Boolean  @default(true)
+  effectiveDate   DateTime @default(now())
+  createdAt       DateTime @default(now())
+
+  @@index([userId])
+}
+
+// ----------------------------------------------------------------------------
+// EMERGENCY FINANCIAL MODE
+// ----------------------------------------------------------------------------
+
+model EmergencyPlan {
+  id                 String   @id @default(cuid())
+  userId             String
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  triggeredAt        DateTime @default(now())
+  cashRunwayDays     Int
+  survivalBudget     String   // JSON: category -> reduced amount
+  reductionPlan      String   // JSON: list of recommendations
+  priorityPayments   String   // JSON: ordered list of must-pay bills
+  resolvedAt         DateTime?
+
+  @@index([userId])
+}
+
+// ----------------------------------------------------------------------------
+// MONTHLY FINANCIAL WRAPPED
+// ----------------------------------------------------------------------------
+
+model MonthlyWrapped {
+  id                  String   @id @default(cuid())
+  userId              String
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  month               DateTime // first day of month
+  totalIncome         Float
+  totalExpense        Float
+  netSavings          Float
+  topCategory         String?
+  topMerchant         String?
+  biggestExpense      Float?
+  savingsAchievement  String?
+  score               Int
+  shareSlug           String?  @unique
+  generatedAt         DateTime @default(now())
+
+  @@unique([userId, month])
+}
+
+// ----------------------------------------------------------------------------
+// FAMILY & SHARED WALLETS
+// ----------------------------------------------------------------------------
+
+model FamilyGroup {
+  id        String   @id @default(cuid())
+  name      String
+  ownerId   String
+  owner     User     @relation("FamilyGroupOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  members FamilyMember[]
+  wallets Wallet[]
+}
+
+model FamilyMember {
+  id            String   @id @default(cuid())
+  familyGroupId String
+  familyGroup   FamilyGroup @relation(fields: [familyGroupId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role          String   @default("member") // "owner" | "partner" | "member" | "child"
+  joinedAt      DateTime @default(now())
+
+  @@unique([familyGroupId, userId])
+}
+
+// ----------------------------------------------------------------------------
+// NOTIFICATIONS
+// ----------------------------------------------------------------------------
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String   // "budget_alert" | "bill_reminder" | "goal_milestone" | "ai_insight" | "system"
+  title     String
+  body      String
+  link      String?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, isRead])
+}
+
+// ----------------------------------------------------------------------------
+// SUBSCRIPTIONS / PLANS (SaaS billing)
+// ----------------------------------------------------------------------------
+
+model Subscription {
+  id                   String   @id @default(cuid())
+  userId               String   @unique
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan                 String   @default("free") // "free" | "pro" | "family"
+  status               String   @default("active") // "active" | "trialing" | "past_due" | "canceled"
+  currentPeriodStart   DateTime @default(now())
+  currentPeriodEnd     DateTime?
+  cancelAtPeriodEnd    Boolean  @default(false)
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
+
+// ----------------------------------------------------------------------------
+// ADMIN: FEATURE FLAGS
+// ----------------------------------------------------------------------------
+
+model FeatureFlag {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  label       String
+  description String?
+  enabled     Boolean  @default(false)
+  rolloutPct  Int      @default(100) // 0-100 gradual rollout
+  updatedAt   DateTime @updatedAt
+}
+                                                                                                       
