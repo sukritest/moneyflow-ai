@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Menu, Wallet, Lock } from "lucide-react";
+import { Menu, Wallet } from "lucide-react";
 import { NAV_ITEMS, ADMIN_NAV_ITEM } from "@/lib/nav-config";
 import { cn } from "@/lib/utils";
 import { useLocale } from "@/lib/i18n/locale-provider";
@@ -48,7 +48,6 @@ export function MobileNav({ isAdmin, plan = "free" }: MobileNavProps) {
         <nav className="flex-1 overflow-y-auto no-scrollbar px-3 py-4 space-y-1">
           {items.map((item) => {
             const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
-            const locked = item.pro && plan === "free";
             return (
               <Link
                 key={item.href}
@@ -63,28 +62,16 @@ export function MobileNav({ isAdmin, plan = "free" }: MobileNavProps) {
               >
                 <item.icon className="h-5 w-5 shrink-0" />
                 <span className="flex-1 truncate">{t(item.labelKey)}</span>
-                {locked && <Lock className="h-3.5 w-3.5 shrink-0 opacity-50" />}
               </Link>
             );
           })}
         </nav>
-        {plan === "free" && (
-          <div className="p-3 border-t">
-            <Link
-              href="/settings#billing"
-              onClick={() => setOpen(false)}
-              className="flex flex-col gap-1 rounded-lg bg-gradient-to-br from-primary/15 to-primary/5 p-3 text-xs"
-            >
-              <div className="flex items-center justify-between">
-                <span className="font-semibold">{t("settings.upgradeToPro") || "Upgrade to Pro"}</span>
-                <Badge variant="default" className="text-[10px]">PRO</Badge>
-              </div>
-              <span className="text-muted-foreground">
-                {t("settings.unlockAiFeatures") || "Unlock AI insights, forecasts & more"}
-              </span>
-            </Link>
+        <div className="p-3 border-t">
+          <div className="flex items-center justify-between rounded-lg bg-muted/50 p-3 text-xs">
+            <span className="font-medium">{t("settings.allFeaturesFree") || "All features unlocked"}</span>
+            <Badge variant="success" className="text-[10px]">FREE</Badge>
           </div>
-        )}
+        </div>
       </SheetContent>
     </Sheet>
   );
