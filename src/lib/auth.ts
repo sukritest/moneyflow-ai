@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
 import type { User } from "@prisma/client";
 
 /**
@@ -32,36 +33,52 @@ export async function getCurrentUser(): Promise<User | null> {
   }
 
   if (!user) {
-    user = await prisma.user.create({
-      data: {
-        supabaseId: supaUser.id,
-        email: supaUser.email ?? `user-${supaUser.id}@unknown.local`,
-        name:
-          (supaUser.user_metadata?.full_name as string | undefined) ??
-          (supaUser.user_metadata?.name as string | undefined) ??
-          null,
-        avatarUrl: (supaUser.user_metadata?.avatar_url as string | undefined) ?? null,
-      },
-    });
+    try {
+      user = await prisma.user.create({
+        data: {
+          supabaseId: supaUser.id,
+          email: supaUser.email ?? `user-${supaUser.id}@unknown.local`,
+          name:
+            (supaUser.user_metadata?.full_name as string | undefined) ??
+            (supaUser.user_metadata?.name as string | undefined) ??
+            null,
+          avatarUrl: (supaUser.user_metadata?.avatar_url as string | undefined) ?? null,
+        },
+      });
 
-    // Give every new user a default wallet + subscription record
-    await prisma.wallet.create({
-      data: {
-        userId: user.id,
-        name: "Main Wallet",
-        type: "personal",
-        currency: user.currency,
-        isDefault: true,
-      },
-    });
-    await prisma.subscription.create({
-      data: { userId: user.id, plan: "free" },
-    });
+      // Give every new user a default wallet + subscription record
+      await prisma.wallet.create({
+        data: {
+          userId: user.id,
+          name: "Main Wallet",
+          type: "personal",
+          currency: user.currency,
+          isDefault: true,
+        },
+      });
+      await prisma.subscription.create({
+        data: { userId: user.id, plan: "free" },
+      });
+    } catch (err) {
+      // Handle the race where a concurrent request already provisioned this
+      // user (e.g. parallel server-component renders on first login).
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+        user =
+          (await prisma.user.findUnique({ where: { supabaseId: supaUser.id } })) ??
+          (await prisma.user.findUnique({ where: { email: supaUser.email ?? "" } }));
+      } else {
+        throw err;
+      }
+    }
   } else if (!user.supabaseId) {
     user = await prisma.user.update({
       where: { id: user.id },
       data: { supabaseId: supaUser.id },
     });
+  }
+
+  if (!user) {
+    throw new Error("Failed to resolve or provision the current user.");
   }
 
   return user;
