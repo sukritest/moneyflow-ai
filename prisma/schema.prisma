@@ -550,4 +550,3 @@ model FeatureFlag {
   rolloutPct  Int      @default(100) // 0-100 gradual rollout
   updatedAt   DateTime @updatedAt
 }
-                                                                                                       
