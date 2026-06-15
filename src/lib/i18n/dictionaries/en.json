@@ -287,7 +287,8 @@
     "timezone": "Timezone",
     "account": "Account",
     "currentPlanBadge": "Current plan",
-    "choosePlan": "Switch to"
+    "choosePlan": "Switch to",
+    "allFeaturesFree": "All features unlocked — free"
   },
   "chat": {
     "title": "AI Assistant",

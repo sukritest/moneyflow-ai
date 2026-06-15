@@ -287,7 +287,8 @@
     "timezone": "เขตเวลา",
     "account": "บัญชี",
     "currentPlanBadge": "แพ็กเกจปัจจุบัน",
-    "choosePlan": "เปลี่ยนเป็น"
+    "choosePlan": "เปลี่ยนเป็น",
+    "allFeaturesFree": "ใช้งานได้ทุกฟีเจอร์ฟรี"
   },
   "chat": {
     "title": "ผู้ช่วย AI",
