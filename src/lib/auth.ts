@@ -8,9 +8,14 @@ import type { User } from "@prisma/client";
  */
 export async function getSupabaseUser() {
   const supabase = await createClient();
-  const { data, error } = await supabase.auth.getUser();
-  if (error || !data.user) return null;
-  return data.user;
+  // Use getSession() instead of getUser(): getSession() reads/decodes the
+  // session from cookies locally, while getUser() makes a network round
+  // trip to Supabase's Auth (GoTrue) API on every call. The session token
+  // is already verified and refreshed by the middleware on each request,
+  // so re-validating it again here just adds latency without extra safety.
+  const { data, error } = await supabase.auth.getSession();
+  if (error || !data.session?.user) return null;
+  return data.session.user;
 }
 
 /**
