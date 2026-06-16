@@ -45,6 +45,20 @@ function LineIcon() {
   );
 }
 
+// Generate a nonce pair: [rawNonce, hashedNonce]
+// rawNonce passed to Supabase; hashedNonce passed to Google
+async function generateNonce(): Promise<[string, string]> {
+  const rawNonce = btoa(
+    String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))
+  );
+  const encoder = new TextEncoder();
+  const hashBuffer = await crypto.subtle.digest("SHA-256", encoder.encode(rawNonce));
+  const hashedNonce = Array.from(new Uint8Array(hashBuffer))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+  return [rawNonce, hashedNonce];
+}
+
 // Load the Google Identity Services script once
 function loadGIS(): Promise<void> {
   return new Promise((resolve) => {
@@ -85,15 +99,18 @@ export function OAuthButtons() {
     try {
       await loadGIS();
       const supabase = createClient();
+      const [rawNonce, hashedNonce] = await generateNonce();
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).google.accounts.id.initialize({
         client_id: GOOGLE_CLIENT_ID,
+        nonce: hashedNonce, // Google embeds this in the id_token
         auto_select: false,
         callback: async (response: { credential: string }) => {
           const { error: signInError } = await supabase.auth.signInWithIdToken({
             provider: "google",
             token: response.credential,
+            nonce: rawNonce, // Supabase hashes this and checks against the token
           });
           if (signInError) {
             setError(signInError.message);
