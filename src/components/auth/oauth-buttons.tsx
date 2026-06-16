@@ -4,10 +4,15 @@ import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/client";
 import { useLocale } from "@/lib/i18n/locale-provider";
+import { useRouter } from "next/navigation";
 
 const SUPABASE_CONFIGURED = Boolean(
   process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 );
+
+// Google OAuth Client ID (public, safe to embed)
+const GOOGLE_CLIENT_ID =
+  "819509066839-d9t420e2knej2loe73c69l4f4bcu6754.apps.googleusercontent.com";
 
 function GoogleIcon() {
   return (
@@ -40,31 +45,96 @@ function LineIcon() {
   );
 }
 
+// Load the Google Identity Services script once
+function loadGIS(): Promise<void> {
+  return new Promise((resolve) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if ((window as any).google?.accounts?.id) {
+      resolve();
+      return;
+    }
+    const existing = document.getElementById("google-gsi-script");
+    if (existing) {
+      existing.addEventListener("load", () => resolve());
+      return;
+    }
+    const script = document.createElement("script");
+    script.id = "google-gsi-script";
+    script.src = "https://accounts.google.com/gsi/client";
+    script.async = true;
+    script.defer = true;
+    script.onload = () => resolve();
+    document.head.appendChild(script);
+  });
+}
+
 export function OAuthButtons() {
   const { t } = useLocale();
+  const router = useRouter();
   const [loading, setLoading] = React.useState<"google" | "line" | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
-  async function handleOAuth(provider: "google" | "line") {
+  async function handleGoogleSignIn() {
     if (!SUPABASE_CONFIGURED) {
-      setError(
-        "Supabase isn't configured yet, so social login is disabled in demo mode."
-      );
+      setError("Supabase isn't configured yet, so social login is disabled in demo mode.");
       return;
     }
     setError(null);
-    setLoading(provider);
+    setLoading("google");
+
+    try {
+      await loadGIS();
+      const supabase = createClient();
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        auto_select: false,
+        callback: async (response: { credential: string }) => {
+          const { error: signInError } = await supabase.auth.signInWithIdToken({
+            provider: "google",
+            token: response.credential,
+          });
+          if (signInError) {
+            setError(signInError.message);
+            setLoading(null);
+          } else {
+            router.push("/dashboard");
+          }
+        },
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).google.accounts.id.prompt((notification: any) => {
+        if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+          setError("Google sign-in popup was blocked or dismissed. Please allow popups and try again.");
+          setLoading(null);
+        }
+      });
+    } catch {
+      setError("Failed to load Google sign-in. Please try again.");
+      setLoading(null);
+    }
+  }
+
+  async function handleLineOAuth() {
+    if (!SUPABASE_CONFIGURED) {
+      setError("Supabase isn't configured yet, so social login is disabled in demo mode.");
+      return;
+    }
+    setError(null);
+    setLoading("line");
     const supabase = createClient();
-    const { error } = await supabase.auth.signInWithOAuth({
+    const { error: oauthError } = await supabase.auth.signInWithOAuth({
       // LINE is wired as a custom OIDC provider in Supabase (see .env.example).
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      provider: provider as any,
+      provider: "line" as any,
       options: {
         redirectTo: `${window.location.origin}/auth/callback`,
       },
     });
-    if (error) {
-      setError(error.message);
+    if (oauthError) {
+      setError(oauthError.message);
       setLoading(null);
     }
   }
@@ -76,7 +146,7 @@ export function OAuthButtons() {
           type="button"
           variant="outline"
           disabled={loading !== null}
-          onClick={() => handleOAuth("google")}
+          onClick={handleGoogleSignIn}
         >
           <GoogleIcon />
           <span className="ml-2">{loading === "google" ? "..." : "Google"}</span>
@@ -85,7 +155,7 @@ export function OAuthButtons() {
           type="button"
           variant="outline"
           disabled={loading !== null}
-          onClick={() => handleOAuth("line")}
+          onClick={handleLineOAuth}
         >
           <LineIcon />
           <span className="ml-2">{loading === "line" ? "..." : "LINE"}</span>
